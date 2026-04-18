@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Asteroid Siege</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="game-shell">
+    <section class="hud-card">
+      <div>
+        <p class="eyebrow">Arcade Survival</p>
+        <h1>Asteroid Siege</h1>
+        <p class="subtitle">
+          Hold the center. Asteroids rush in from every direction and you shoot them down before they crash into your base.
+        </p>
+      </div>
+
+      <div class="controls-row">
+        <label for="difficulty">Difficulty</label>
+        <select id="difficulty">
+          <option value="easy">Easy</option>
+          <option value="medium" selected>Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+        <button id="restartButton" type="button">Start / Restart</button>
+      </div>
+
+      <div class="stats">
+        <div class="stat-box">
+          <span class="stat-label">Score</span>
+          <strong id="score">0</strong>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">Health</span>
+          <strong id="health">100</strong>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">Wave Time</span>
+          <strong id="survivalTime">0.0s</strong>
+        </div>
+      </div>
+
+      <p class="instructions">
+        Aim with your mouse. Click or hold the mouse button to fire. Press <kbd>Space</kbd> to restart after a loss.
+      </p>
+    </section>
+
+    <section class="canvas-wrap">
+      <canvas id="gameCanvas" width="960" height="640" aria-label="Asteroid shooter game"></canvas>
+      <div id="overlay" class="overlay visible">
+        <div class="overlay-card">
+          <h2>Defend the Core</h2>
+          <p>Pick a difficulty and blast incoming asteroids before they reach the center.</p>
+          <p class="overlay-note">Easy has fewer, slower asteroids. Hard keeps the screen crowded and fast.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="./game.js"></script>
+</body>
+</html>
