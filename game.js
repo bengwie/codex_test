@@ -6,6 +6,7 @@ const restartButton = document.getElementById("restartButton");
 const scoreEl = document.getElementById("score");
 const healthEl = document.getElementById("health");
 const survivalTimeEl = document.getElementById("survivalTime");
+const stageEl = document.getElementById("stage");
 const overlay = document.getElementById("overlay");
 
 const GAME_CONFIG = {
@@ -17,6 +18,8 @@ const GAME_CONFIG = {
     fireRate: 0.18,
     asteroidHealthMin: 1,
     asteroidHealthMax: 2,
+    stageTarget: 14,
+    bossHealth: 22,
   },
   medium: {
     asteroidCap: 10,
@@ -26,6 +29,8 @@ const GAME_CONFIG = {
     fireRate: 0.15,
     asteroidHealthMin: 1,
     asteroidHealthMax: 3,
+    stageTarget: 18,
+    bossHealth: 32,
   },
   hard: {
     asteroidCap: 15,
@@ -35,6 +40,8 @@ const GAME_CONFIG = {
     fireRate: 0.12,
     asteroidHealthMin: 2,
     asteroidHealthMax: 4,
+    stageTarget: 24,
+    bossHealth: 42,
   },
 };
 
@@ -45,6 +52,11 @@ const state = {
   score: 0,
   health: 100,
   elapsed: 0,
+  stage: 1,
+  stageKills: 0,
+  stageGoal: 0,
+  announcement: "",
+  announcementTimer: 0,
   fireCooldown: 0,
   spawnAccumulator: 0,
   shootHeld: false,
@@ -58,6 +70,8 @@ const state = {
   bullets: [],
   asteroids: [],
   particles: [],
+  enemyBullets: [],
+  boss: null,
 };
 
 function randomBetween(min, max) {
@@ -75,11 +89,19 @@ function resetGame() {
   state.score = 0;
   state.health = 100;
   state.elapsed = 0;
+  state.stage = 1;
+  state.stageKills = 0;
   state.fireCooldown = 0;
   state.spawnAccumulator = 0;
+  state.announcement = "";
+  state.announcementTimer = 0;
   state.bullets = [];
   state.asteroids = [];
   state.particles = [];
+  state.enemyBullets = [];
+  state.boss = null;
+  state.stageGoal = getStageGoal();
+  announce(`Stage ${state.stage} incoming`);
   updateHud();
   setOverlay(false);
 }
@@ -90,7 +112,7 @@ function endGame() {
   setOverlay(
     true,
     "Core Destroyed",
-    `Final score: ${state.score}. Survived ${state.elapsed.toFixed(1)} seconds on ${capitalize(state.difficulty)}.`,
+    `Final score: ${state.score}. You reached stage ${state.stage} and survived ${state.elapsed.toFixed(1)} seconds on ${capitalize(state.difficulty)}.`,
     "Press Space or Start / Restart to jump back in."
   );
 }
@@ -120,23 +142,41 @@ function updateHud() {
   scoreEl.textContent = String(state.score);
   healthEl.textContent = String(Math.max(0, Math.round(state.health)));
   survivalTimeEl.textContent = `${state.elapsed.toFixed(1)}s`;
+  stageEl.textContent = String(state.stage);
+}
+
+function getStageGoal() {
+  const config = GAME_CONFIG[state.difficulty];
+  return config.stageTarget + (state.stage - 1) * 5;
+}
+
+function getStageScale() {
+  return 1 + (state.stage - 1) * 0.16;
+}
+
+function announce(message) {
+  state.announcement = message;
+  state.announcementTimer = 2.6;
 }
 
 function spawnAsteroid() {
   const config = GAME_CONFIG[state.difficulty];
-  if (state.asteroids.length >= config.asteroidCap) {
+  const stageScale = getStageScale();
+  const currentCap = Math.round(config.asteroidCap + (state.stage - 1) * 1.25);
+
+  if (state.asteroids.length >= currentCap || state.boss) {
     return;
   }
 
   const angle = Math.random() * Math.PI * 2;
   const spawnRadius = Math.max(canvas.width, canvas.height) * 0.68;
-  const size = randomBetween(16, 34);
+  const size = randomBetween(16, 34 + state.stage * 1.2);
   const startX = state.player.x + Math.cos(angle) * spawnRadius;
   const startY = state.player.y + Math.sin(angle) * spawnRadius;
   const toCenterX = state.player.x - startX;
   const toCenterY = state.player.y - startY;
   const distance = Math.hypot(toCenterX, toCenterY) || 1;
-  const speed = randomBetween(config.speedMin, config.speedMax);
+  const speed = randomBetween(config.speedMin, config.speedMax) * stageScale;
 
   state.asteroids.push({
     x: startX,
@@ -146,7 +186,7 @@ function spawnAsteroid() {
     vy: (toCenterY / distance) * speed,
     rotation: Math.random() * Math.PI * 2,
     spin: randomBetween(-1.8, 1.8),
-    health: randomInt(config.asteroidHealthMin, config.asteroidHealthMax),
+    health: randomInt(config.asteroidHealthMin, config.asteroidHealthMax) + Math.floor((state.stage - 1) / 2),
   });
 }
 
@@ -163,6 +203,49 @@ function shootBullet() {
     radius: 4,
     life: 1.3,
   });
+}
+
+function fireEnemyBullet(x, y, speed, angleOffset = 0) {
+  const angle = Math.atan2(state.player.y - y, state.player.x - x) + angleOffset;
+  state.enemyBullets.push({
+    x,
+    y,
+    vx: Math.cos(angle) * speed,
+    vy: Math.sin(angle) * speed,
+    radius: 6,
+    life: 3.2,
+  });
+}
+
+function spawnBoss() {
+  const config = GAME_CONFIG[state.difficulty];
+  const stageScale = getStageScale();
+  const bossHealth = Math.round((config.bossHealth + (state.stage - 1) * 12) * stageScale);
+
+  state.boss = {
+    x: canvas.width * 0.5,
+    y: 116,
+    width: 146,
+    height: 62,
+    vx: 170 + (state.stage - 1) * 18,
+    health: bossHealth,
+    maxHealth: bossHealth,
+    fireCooldown: 1.1,
+    entryTimer: 1.2,
+    phase: 0,
+  };
+
+  announce(`Boss incoming: stage ${state.stage}`);
+}
+
+function advanceStage() {
+  state.stage += 1;
+  state.stageKills = 0;
+  state.stageGoal = getStageGoal();
+  state.spawnAccumulator = 0;
+  state.enemyBullets = [];
+  state.health = Math.min(100, state.health + 16);
+  announce(`Stage ${state.stage} online`);
 }
 
 function burstParticles(x, y, color, count, spread) {
@@ -189,6 +272,7 @@ function update(delta) {
   const config = GAME_CONFIG[state.difficulty];
   state.elapsed += delta;
   state.fireCooldown = Math.max(0, state.fireCooldown - delta);
+  state.announcementTimer = Math.max(0, state.announcementTimer - delta);
   state.player.angle = Math.atan2(state.pointer.y - state.player.y, state.pointer.x - state.player.x);
 
   if (state.shootHeld && state.fireCooldown === 0) {
@@ -196,10 +280,18 @@ function update(delta) {
     state.fireCooldown = config.fireRate;
   }
 
-  state.spawnAccumulator += delta * config.spawnRate;
-  while (state.spawnAccumulator >= 1) {
-    spawnAsteroid();
-    state.spawnAccumulator -= 1;
+  const stageScale = getStageScale();
+
+  if (!state.boss && state.stageKills < state.stageGoal) {
+    state.spawnAccumulator += delta * config.spawnRate * stageScale;
+    while (state.spawnAccumulator >= 1) {
+      spawnAsteroid();
+      state.spawnAccumulator -= 1;
+    }
+  }
+
+  if (!state.boss && state.stageKills >= state.stageGoal && state.asteroids.length === 0) {
+    spawnBoss();
   }
 
   state.bullets = state.bullets.filter((bullet) => {
@@ -213,6 +305,28 @@ function update(delta) {
       bullet.x < canvas.width + 40 &&
       bullet.y > -40 &&
       bullet.y < canvas.height + 40
+    );
+  });
+
+  state.enemyBullets = state.enemyBullets.filter((bullet) => {
+    bullet.x += bullet.vx * delta;
+    bullet.y += bullet.vy * delta;
+    bullet.life -= delta;
+
+    const dx = bullet.x - state.player.x;
+    const dy = bullet.y - state.player.y;
+    if (Math.hypot(dx, dy) <= bullet.radius + state.player.radius) {
+      state.health -= 9;
+      burstParticles(bullet.x, bullet.y, "#ff8a70", 10, 90);
+      return false;
+    }
+
+    return (
+      bullet.life > 0 &&
+      bullet.x > -60 &&
+      bullet.x < canvas.width + 60 &&
+      bullet.y > -60 &&
+      bullet.y < canvas.height + 60
     );
   });
 
@@ -248,9 +362,57 @@ function update(delta) {
         if (asteroid.health <= 0) {
           asteroid.destroyed = true;
           state.score += 10;
+          state.stageKills += 1;
           burstParticles(asteroid.x, asteroid.y, "#ffd166", 18, 140);
         }
       }
+    }
+  }
+
+  if (state.boss) {
+    const boss = state.boss;
+    boss.phase += delta;
+
+    if (boss.entryTimer > 0) {
+      boss.entryTimer -= delta;
+      boss.y += (130 - boss.y) * 0.06;
+    } else {
+      boss.x += boss.vx * delta;
+      if (boss.x < 120 || boss.x > canvas.width - 120) {
+        boss.vx *= -1;
+      }
+
+      boss.y = 116 + Math.sin(boss.phase * 1.8) * 28;
+      boss.fireCooldown -= delta;
+      if (boss.fireCooldown <= 0) {
+        fireEnemyBullet(boss.x, boss.y + 24, 180 + state.stage * 10, 0);
+        fireEnemyBullet(boss.x - 24, boss.y + 24, 170 + state.stage * 10, -0.22);
+        fireEnemyBullet(boss.x + 24, boss.y + 24, 170 + state.stage * 10, 0.22);
+        boss.fireCooldown = Math.max(0.45, 1.2 - state.stage * 0.06);
+      }
+    }
+
+    for (const bullet of state.bullets) {
+      const hitX = Math.abs(bullet.x - boss.x) <= boss.width * 0.5;
+      const hitY = Math.abs(bullet.y - boss.y) <= boss.height * 0.5;
+      if (hitX && hitY && bullet.life > 0) {
+        boss.health -= 1;
+        bullet.life = 0;
+        burstParticles(bullet.x, bullet.y, "#67d5ff", 8, 90);
+      }
+    }
+
+    const dx = Math.abs(state.player.x - boss.x);
+    const dy = Math.abs(state.player.y - boss.y);
+    if (dx <= boss.width * 0.5 + state.player.radius && dy <= boss.height * 0.5 + state.player.radius) {
+      state.health -= 28 * delta;
+    }
+
+    if (boss.health <= 0) {
+      state.score += 150;
+      burstParticles(boss.x, boss.y, "#ffd166", 40, 220);
+      state.boss = null;
+      advanceStage();
     }
   }
 
@@ -380,6 +542,136 @@ function drawParticle(particle) {
   ctx.restore();
 }
 
+function drawEnemyBullet(bullet) {
+  ctx.beginPath();
+  ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+  ctx.fillStyle = "#ff8a70";
+  ctx.fill();
+}
+
+function drawBoss() {
+  if (!state.boss) {
+    return;
+  }
+
+  const boss = state.boss;
+  ctx.save();
+  ctx.translate(boss.x, boss.y);
+
+  ctx.fillStyle = "rgba(255, 117, 117, 0.18)";
+  ctx.beginPath();
+  ctx.ellipse(0, 0, boss.width * 0.62, boss.height * 0.68, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#7c8ff4";
+  ctx.beginPath();
+  ctx.ellipse(0, 0, boss.width * 0.5, boss.height * 0.35, 0, Math.PI, 0);
+  ctx.fill();
+
+  ctx.fillStyle = "#dce4ff";
+  ctx.beginPath();
+  ctx.moveTo(-boss.width * 0.46, 0);
+  ctx.quadraticCurveTo(0, boss.height * 0.75, boss.width * 0.46, 0);
+  ctx.quadraticCurveTo(0, -boss.height * 0.2, -boss.width * 0.46, 0);
+  ctx.fill();
+
+  ctx.fillStyle = "#67d5ff";
+  ctx.beginPath();
+  ctx.ellipse(0, -4, boss.width * 0.15, boss.height * 0.13, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = "#f7f9ff";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-boss.width * 0.52, 2);
+  ctx.lineTo(boss.width * 0.52, 2);
+  ctx.stroke();
+  ctx.restore();
+
+  const barWidth = 240;
+  const barHeight = 12;
+  const barX = canvas.width * 0.5 - barWidth * 0.5;
+  const barY = 28;
+  const ratio = Math.max(0, boss.health / boss.maxHealth);
+
+  ctx.fillStyle = "rgba(4, 12, 26, 0.8)";
+  ctx.fillRect(barX, barY, barWidth, barHeight);
+  ctx.fillStyle = "#ff6b6b";
+  ctx.fillRect(barX, barY, barWidth * ratio, barHeight);
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
+  ctx.strokeRect(barX, barY, barWidth, barHeight);
+
+  ctx.fillStyle = "#edf4ff";
+  ctx.font = "700 14px Trebuchet MS";
+  ctx.textAlign = "center";
+  ctx.fillText(`Alien Boss - Stage ${state.stage}`, canvas.width * 0.5, 20);
+}
+
+function drawCombatHud() {
+  const panelX = 18;
+  const panelY = 18;
+  const panelWidth = 230;
+  const barWidth = 150;
+  const healthRatio = Math.max(0, state.health / 100);
+
+  ctx.save();
+  ctx.fillStyle = "rgba(5, 14, 30, 0.72)";
+  ctx.strokeStyle = "rgba(151, 191, 255, 0.22)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(panelX, panelY, panelWidth, 82, 16);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = "#9eb6d3";
+  ctx.font = "700 12px Trebuchet MS";
+  ctx.textAlign = "left";
+  ctx.fillText("CORE STATUS", panelX + 16, panelY + 22);
+
+  ctx.fillStyle = "#edf4ff";
+  ctx.font = "700 18px Trebuchet MS";
+  ctx.fillText(`${Math.round(state.health)} HP`, panelX + 16, panelY + 46);
+
+  ctx.fillStyle = "rgba(255, 255, 255, 0.08)";
+  ctx.fillRect(panelX + 16, panelY + 56, barWidth, 12);
+  ctx.fillStyle = healthRatio > 0.35 ? "#67d5ff" : "#ff6b6b";
+  ctx.fillRect(panelX + 16, panelY + 56, barWidth * healthRatio, 12);
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+  ctx.strokeRect(panelX + 16, panelY + 56, barWidth, 12);
+
+  ctx.fillStyle = "#d9e7ff";
+  ctx.font = "700 13px Trebuchet MS";
+  ctx.fillText(`Stage ${state.stage}`, panelX + 182, panelY + 46);
+  ctx.font = "700 12px Trebuchet MS";
+  ctx.fillStyle = "#9eb6d3";
+  const targetText = state.boss
+    ? "Boss fight"
+    : `${Math.max(0, state.stageGoal - state.stageKills)} asteroids to boss`;
+  ctx.fillText(targetText, panelX + 16, panelY + 78);
+  ctx.restore();
+}
+
+function drawAnnouncement() {
+  if (state.announcementTimer <= 0) {
+    return;
+  }
+
+  const alpha = Math.min(1, state.announcementTimer / 0.4, state.announcementTimer / 2.2);
+  ctx.save();
+  ctx.globalAlpha = Math.max(0.15, alpha);
+  ctx.fillStyle = "rgba(3, 10, 22, 0.62)";
+  ctx.beginPath();
+  ctx.roundRect(canvas.width * 0.5 - 160, canvas.height - 86, 320, 42, 16);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(103, 213, 255, 0.3)";
+  ctx.stroke();
+  ctx.fillStyle = "#edf4ff";
+  ctx.font = "700 18px Trebuchet MS";
+  ctx.textAlign = "center";
+  ctx.fillText(state.announcement, canvas.width * 0.5, canvas.height - 58);
+  ctx.restore();
+}
+
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -406,11 +698,18 @@ function draw() {
     drawBullet(bullet);
   }
 
+  for (const bullet of state.enemyBullets) {
+    drawEnemyBullet(bullet);
+  }
+
   for (const asteroid of state.asteroids) {
     drawAsteroid(asteroid);
   }
 
+  drawBoss();
   drawPlayer();
+  drawCombatHud();
+  drawAnnouncement();
 
   if (!state.running) {
     ctx.save();
@@ -463,8 +762,8 @@ window.addEventListener("keydown", (event) => {
 setOverlay(
   true,
   "Defend the Core",
-  "Pick a difficulty and blast incoming asteroids before they reach the center.",
-  "Easy has fewer, slower asteroids. Hard keeps the screen crowded and fast."
+  "Rip through the starfield, stop the asteroid wave, and survive the alien boss at the end of every stage.",
+  "Easy has fewer, slower asteroids. Hard floods the arena and sends nastier bosses sooner."
 );
 
 updateHud();
